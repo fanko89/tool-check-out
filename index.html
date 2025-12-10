@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Tool Check In/Out</title>
+  <title>Tool Check In / Out</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Bootstrap CSS -->
@@ -293,7 +293,7 @@
     const STORAGE_KEY = "toolCheckouts_v1";
 
     // Apps Script Web App URL
-    const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwYebiDdugmC3KM-kXaoXKiCdq4fFXPQ3J-RI4VWGI/dev";
+    const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz2fyh_B-ym97p3NOrzSXToUkF7A0v1g761hiIzejhd_G5kYKJQb8ZYErqG7p2EnCBF/exec";
 
     let records = [];
 
@@ -387,41 +387,40 @@
     // --- Google Sheets logging via Apps Script ---
 
     async function logToGoogleSheets(action, rec, daysOutAtEvent) {
-      if (
-        !GOOGLE_APPS_SCRIPT_URL ||
-        GOOGLE_APPS_SCRIPT_URL.includes("https://script.google.com/macros/s/AKfycbwYebiDdugmC3KM-kXaoXKiCdq4fFXPQ3J-RI4VWGI/dev")
-      ) {
-        // URL not set yet; skip logging to avoid errors
-        return;
-      }
+  if (!GOOGLE_APPS_SCRIPT_URL) {
+    console.warn("GOOGLE_APPS_SCRIPT_URL is not set; skipping Sheets log.");
+    return;
+  }
 
-      const payload = {
-        action,
-        id: rec.id,
-        toolName: rec.toolName,
-        techName: rec.techName,
-        jobName: rec.jobName,
-        reason: rec.reason,
-        checkoutDate: rec.checkoutDate,
-        returnDate: rec.returnDate,
-        conditionAtCheckout: rec.conditionAtCheckout,
-        conditionAtReturn: rec.conditionAtReturn,
-        damagedOrMissing: rec.damagedOrMissing,
-        damageNotes: rec.damageNotes,
-        daysOut: daysOutAtEvent
-      };
+  const payload = {
+    action,
+    id: rec.id,
+    toolName: rec.toolName,
+    techName: rec.techName,
+    jobName: rec.jobName,
+    reason: rec.reason,
+    checkoutDate: rec.checkoutDate,
+    returnDate: rec.returnDate,
+    conditionAtCheckout: rec.conditionAtCheckout,
+    conditionAtReturn: rec.conditionAtReturn,
+    damagedOrMissing: rec.damagedOrMissing,
+    damageNotes: rec.damageNotes,
+    daysOut: daysOutAtEvent
+  };
 
-      try {
-        await fetch(GOOGLE_APPS_SCRIPT_URL, {
-          method: "POST",
-          // No headers = no preflight; Apps Script reads raw JSON fine
-          body: JSON.stringify(payload)
-        });
-      } catch (err) {
-        console.error("Failed to log to Google Sheets:", err);
-      }
+  try {
+    const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      console.error("Sheets log HTTP error:", res.status, await res.text());
     }
-
+  } catch (err) {
+    console.error("Failed to log to Google Sheets:", err);
+  }
+}
     // --- Filters ---
 
     function matchesFilters(rec) {
