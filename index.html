@@ -34,25 +34,102 @@
       background-color: #cff4fc;
       color: #055160;
     }
+    .no-print {
+      /* default: visible on screen, hidden in print via media query */
+    }
+
+    @media print {
+      body {
+        background-color: #ffffff;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .card {
+        box-shadow: none !important;
+        border: none !important;
+      }
+      .container {
+        max-width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="container py-4">
-    <h1 class="mb-3">Tool Check In / Out</h1>
-    <p class="text-muted mb-4">
+    <h1 class="mb-1">Tool Check In / Out</h1>
+    <p class="text-muted mb-3">
       Simple tracking for company-owned tools: saws, reclaim units, specialty tools,
       etc. Based on the warehouse check in/out procedure.
     </p>
 
+    <!-- Top bar: Filters + Export -->
+    <div class="card mb-4 no-print">
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+        <span>Filters &amp; Export</span>
+        <button id="exportCsvBtn" class="btn btn-sm btn-outline-secondary">
+          Export All Records (CSV)
+        </button>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label" for="filterTool">Filter by Tool</label>
+            <input type="text" id="filterTool" class="form-control"
+                   placeholder="e.g. Reclaim Unit" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="filterTech">Filter by Technician</label>
+            <input type="text" id="filterTech" class="form-control"
+                   placeholder="Tech name" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="filterStatus">Filter by Status</label>
+            <select id="filterStatus" class="form-select">
+              <option value="all" selected>All</option>
+              <option value="active">Active</option>
+              <option value="returned">Returned</option>
+              <option value="damaged">Damaged / Missing</option>
+              <option value="over30">Over 30 days</option>
+              <option value="over90">Over 90 days</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Check Out Form -->
-    <div class="card mb-4">
+    <div class="card mb-4 no-print">
       <div class="card-header fw-bold">Check Out a Tool</div>
       <div class="card-body">
         <form id="checkoutForm" class="row g-3">
           <div class="col-md-4">
             <label for="toolName" class="form-label">Tool</label>
-            <input type="text" id="toolName" class="form-control" required
-                   placeholder="e.g. Reclaim Unit, Panel Saw" />
+            <input
+              type="text"
+              id="toolName"
+              class="form-control"
+              required
+              placeholder="e.g. Reclaim Unit, Panel Saw"
+              list="toolPresets"
+            />
+            <!-- Preset tools (user can still type anything they want) -->
+            <datalist id="toolPresets">
+              <option value="Reclaim Unit"></option>
+              <option value="Recovery Machine"></option>
+              <option value="Vacuum Pump"></option>
+              <option value="Nitrogen Regulator"></option>
+              <option value="Digital Manifold"></option>
+              <option value="Combustion Analyzer"></option>
+              <option value="Core Removal Tool"></option>
+              <option value="Tubing Cutter"></option>
+              <option value="Hole Saw"></option>
+              <option value="Panel Saw"></option>
+              <option value="Hammer Drill"></option>
+              <option value="SDS Drill"></option>
+              <option value="Scissor Lift"></option>
+              <option value="Ladder"></option>
+            </datalist>
           </div>
 
           <div class="col-md-4">
@@ -100,7 +177,12 @@
 
     <!-- Active Checkouts -->
     <div class="card mb-4">
-      <div class="card-header fw-bold">Active Tool Checkouts</div>
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+        <span>Active Tool Checkouts</span>
+        <button id="printCheckoutBtn" class="btn btn-sm btn-outline-secondary no-print">
+          Print Checkout Sheet
+        </button>
+      </div>
       <div class="card-body">
         <div class="table-responsive">
           <table class="table table-sm align-middle">
@@ -114,7 +196,7 @@
                 <th>Status</th>
                 <th>Reason</th>
                 <th>Condition @ Out</th>
-                <th style="width: 160px;">Actions</th>
+                <th style="width: 160px;" class="no-print">Actions</th>
               </tr>
             </thead>
             <tbody id="activeTableBody">
@@ -128,8 +210,42 @@
       </div>
     </div>
 
+    <!-- Exceptions / Issues (Purchasing / GM View) -->
+    <div class="card mb-4 no-print">
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+        <span>Exceptions &amp; Issues (Purchasing / GM View)</span>
+        <span class="text-muted small">
+          Shows tools over 30 days and any damaged / missing items.
+        </span>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Tech</th>
+                <th>Job</th>
+                <th>Checkout</th>
+                <th>Return</th>
+                <th>Days Out</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="issuesTableBody">
+              <!-- Issues rows injected here -->
+            </tbody>
+          </table>
+        </div>
+        <p id="noIssuesMsg" class="text-muted small mb-0 d-none">
+          No exceptions or issues at this time.
+        </p>
+      </div>
+    </div>
+
     <!-- History -->
-    <div class="card">
+    <div class="card no-print">
       <div class="card-header fw-bold">Returned / Closed Records</div>
       <div class="card-body">
         <div class="table-responsive">
@@ -165,10 +281,16 @@
   <script>
     const STORAGE_KEY = "toolCheckouts_v1";
 
-    // ⬇️ Paste your Apps Script Web App URL here
+    // Apps Script Web App 
     const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwYebiDdugmC3KM-kXaoXKiCdq4fFXPQ3J-RI4VWGI/dev";
 
     let records = [];
+
+    const filters = {
+      tool: "",
+      tech: "",
+      status: "all"
+    };
 
     // --- Helpers for dates & status ---
 
@@ -289,19 +411,69 @@
       }
     }
 
+    // --- Filters ---
+
+    function matchesFilters(rec) {
+      const toolFilter = filters.tool.trim().toLowerCase();
+      const techFilter = filters.tech.trim().toLowerCase();
+      const statusFilter = filters.status;
+
+      const checkoutDate = new Date(rec.checkoutDate);
+      const now = new Date();
+      const daysOutNow = daysBetween(checkoutDate, now);
+
+      if (toolFilter) {
+        const toolName = (rec.toolName || "").toLowerCase();
+        if (!toolName.includes(toolFilter)) return false;
+      }
+
+      if (techFilter) {
+        const techName = (rec.techName || "").toLowerCase();
+        if (!techName.includes(techFilter)) return false;
+      }
+
+      if (statusFilter === "all") return true;
+
+      const isActive = !rec.returnDate && !rec.damagedOrMissing;
+      const isReturned = !!rec.returnDate && !rec.damagedOrMissing;
+      const isDamaged = !!rec.damagedOrMissing;
+      const isOver30 = daysOutNow > 30;
+      const isOver90 = daysOutNow > 90;
+
+      switch (statusFilter) {
+        case "active":
+          return isActive;
+        case "returned":
+          return isReturned;
+        case "damaged":
+          return isDamaged;
+        case "over30":
+          return isOver30;
+        case "over90":
+          return isOver90;
+        default:
+          return true;
+      }
+    }
+
     // --- Rendering tables ---
 
     function renderTables() {
       const activeBody = document.getElementById("activeTableBody");
       const historyBody = document.getElementById("historyTableBody");
+      const issuesBody = document.getElementById("issuesTableBody");
+
       const noActiveMsg = document.getElementById("noActiveMsg");
       const noHistoryMsg = document.getElementById("noHistoryMsg");
+      const noIssuesMsg = document.getElementById("noIssuesMsg");
 
       activeBody.innerHTML = "";
       historyBody.innerHTML = "";
+      issuesBody.innerHTML = "";
 
       let activeCount = 0;
       let historyCount = 0;
+      let issuesCount = 0;
 
       records.forEach(rec => {
         const checkoutDate = new Date(rec.checkoutDate);
@@ -312,45 +484,88 @@
         const daysOut = daysBetween(new Date(rec.checkoutDate), referenceEnd);
         const status = computeStatus(rec);
 
-        if (!hasReturn && !rec.damagedOrMissing) {
-          // Active
-          activeCount++;
-          const tr = document.createElement("tr");
+        // --- Active & History respect filters ---
+        if (matchesFilters(rec)) {
+          if (!hasReturn && !rec.damagedOrMissing) {
+            // Active
+            activeCount++;
+            const tr = document.createElement("tr");
 
-          tr.innerHTML = `
-            <td>${rec.toolName}</td>
-            <td>${rec.techName}</td>
-            <td>${rec.jobName}</td>
-            <td>${checkoutDateStr}</td>
-            <td>${daysOut}</td>
-            <td>
-              <span class="badge status-badge ${status.style}">
-                ${status.label}
-              </span>
-            </td>
-            <td>${rec.reason}</td>
-            <td class="text-capitalize">${rec.conditionAtCheckout}</td>
-            <td>
-              <button class="btn btn-sm btn-success me-2"
-                      data-action="checkin" data-id="${rec.id}">
-                Check In
-              </button>
-              <button class="btn btn-sm btn-outline-danger"
-                      data-action="damage" data-id="${rec.id}">
-                Damaged / Missing
-              </button>
-            </td>
-          `;
-          activeBody.appendChild(tr);
-        } else {
-          // History (returned or damaged/missing)
-          historyCount++;
+            tr.innerHTML = `
+              <td>${rec.toolName}</td>
+              <td>${rec.techName}</td>
+              <td>${rec.jobName}</td>
+              <td>${checkoutDateStr}</td>
+              <td>${daysOut}</td>
+              <td>
+                <span class="badge status-badge ${status.style}">
+                  ${status.label}
+                </span>
+              </td>
+              <td>${rec.reason}</td>
+              <td class="text-capitalize">${rec.conditionAtCheckout}</td>
+              <td class="no-print">
+                <button class="btn btn-sm btn-success me-2"
+                        data-action="checkin" data-id="${rec.id}">
+                  Check In
+                </button>
+                <button class="btn btn-sm btn-outline-danger"
+                        data-action="damage" data-id="${rec.id}">
+                  Damaged / Missing
+                </button>
+              </td>
+            `;
+            activeBody.appendChild(tr);
+          } else {
+            // History (returned or damaged/missing)
+            historyCount++;
+            const returnDateStr = rec.returnDate
+              ? new Date(rec.returnDate).toLocaleDateString()
+              : "-";
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>${rec.toolName}</td>
+              <td>${rec.techName}</td>
+              <td>${rec.jobName}</td>
+              <td>${checkoutDateStr}</td>
+              <td>${returnDateStr}</td>
+              <td>${daysOut}</td>
+              <td>
+                <span class="badge status-badge ${status.style}">
+                  ${status.label}
+                </span>
+              </td>
+              <td class="text-capitalize">
+                ${rec.conditionAtReturn ? rec.conditionAtReturn : "-"}
+              </td>
+              <td>${rec.damageNotes ? rec.damageNotes : ""}</td>
+            `;
+            historyBody.appendChild(tr);
+          }
+        }
+
+        // --- Issues (Purchasing / GM) ignores filters (always shows everything important) ---
+        const isOver30Active =
+          !hasReturn &&
+          !rec.damagedOrMissing &&
+          daysOut > 30; // active and over 30 days
+
+        const isDamaged = rec.damagedOrMissing === true;
+
+        if (isOver30Active || isDamaged) {
+          issuesCount++;
           const returnDateStr = rec.returnDate
             ? new Date(rec.returnDate).toLocaleDateString()
             : "-";
 
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
+          const notes =
+            rec.damagedOrMissing
+              ? (rec.damageNotes || "Damaged / missing – review with Purchasing / GM")
+              : "Over 30 days – contact technician and warehouse";
+
+          const trIssues = document.createElement("tr");
+          trIssues.innerHTML = `
             <td>${rec.toolName}</td>
             <td>${rec.techName}</td>
             <td>${rec.jobName}</td>
@@ -362,17 +577,95 @@
                 ${status.label}
               </span>
             </td>
-            <td class="text-capitalize">
-              ${rec.conditionAtReturn ? rec.conditionAtReturn : "-"}
-            </td>
-            <td>${rec.damageNotes ? rec.damageNotes : ""}</td>
+            <td>${notes}</td>
           `;
-          historyBody.appendChild(tr);
+          issuesBody.appendChild(trIssues);
         }
       });
 
       noActiveMsg.classList.toggle("d-none", activeCount !== 0);
       noHistoryMsg.classList.toggle("d-none", historyCount !== 0);
+      noIssuesMsg.classList.toggle("d-none", issuesCount !== 0);
+    }
+
+    // --- CSV Export ---
+
+    function exportCsv() {
+      if (!records.length) {
+        alert("No records to export.");
+        return;
+      }
+
+      const header = [
+        "Record ID",
+        "Tool Name",
+        "Tech Name",
+        "Job Name",
+        "Reason",
+        "Checkout Date",
+        "Return Date",
+        "Condition @ Checkout",
+        "Condition @ Return",
+        "Damaged / Missing",
+        "Damage Notes",
+        "Days Out (now)",
+        "Status"
+      ];
+
+      const rows = records.map(rec => {
+        const checkoutDate = rec.checkoutDate ? new Date(rec.checkoutDate) : null;
+        const returnDate = rec.returnDate ? new Date(rec.returnDate) : null;
+
+        const endRef = returnDate || new Date();
+        const daysOut = checkoutDate ? daysBetween(checkoutDate, endRef) : "";
+
+        const status = computeStatus(rec);
+
+        function fmtDate(d) {
+          return d ? d.toLocaleDateString() : "";
+        }
+
+        return [
+          rec.id || "",
+          rec.toolName || "",
+          rec.techName || "",
+          rec.jobName || "",
+          rec.reason || "",
+          fmtDate(checkoutDate),
+          fmtDate(returnDate),
+          rec.conditionAtCheckout || "",
+          rec.conditionAtReturn || "",
+          rec.damagedOrMissing ? "TRUE" : "FALSE",
+          rec.damageNotes || "",
+          daysOut,
+          status.label || ""
+        ];
+      });
+
+      const csvLines = [];
+      csvLines.push(header.join(","));
+      rows.forEach(row => {
+        const escaped = row.map(value => {
+          const v = String(value).replace(/"/g, '""');
+          if (v.search(/("|,|\n)/g) >= 0) {
+            return `"${v}"`;
+          }
+          return v;
+        });
+        csvLines.push(escaped.join(","));
+      });
+
+      const csvContent = csvLines.join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tool_checkin_checkout.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     }
 
     // --- Form + button handlers ---
@@ -487,6 +780,13 @@
       }
     }
 
+    function handleFilterChange() {
+      filters.tool = document.getElementById("filterTool").value;
+      filters.tech = document.getElementById("filterTech").value;
+      filters.status = document.getElementById("filterStatus").value;
+      renderTables();
+    }
+
     // --- Initialize ---
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -503,6 +803,25 @@
       document
         .getElementById("activeTableBody")
         .addEventListener("click", handleActiveTableClick);
+
+      document
+        .getElementById("filterTool")
+        .addEventListener("input", handleFilterChange);
+      document
+        .getElementById("filterTech")
+        .addEventListener("input", handleFilterChange);
+      document
+        .getElementById("filterStatus")
+        .addEventListener("change", handleFilterChange);
+
+      document
+        .getElementById("exportCsvBtn")
+        .addEventListener("click", exportCsv);
+
+      const printBtn = document.getElementById("printCheckoutBtn");
+      if (printBtn) {
+        printBtn.addEventListener("click", () => window.print());
+      }
     });
   </script>
 </body>
