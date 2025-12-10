@@ -36,7 +36,7 @@
       color: #055160;
     }
     .no-print {
-      /* visible on screen, hidden in print via media query */
+      /* default: visible on screen, hidden in print via media query */
     }
 
     @media print {
@@ -128,21 +128,9 @@
               placeholder="e.g. Reclaim Unit, Panel Saw"
               list="toolPresets"
             />
+            <!-- Dynamic presets: filled from history via JS -->
             <datalist id="toolPresets">
-              <option value="Reclaim Unit"></option>
-              <option value="Recovery Machine"></option>
-              <option value="Vacuum Pump"></option>
-              <option value="Nitrogen Regulator"></option>
-              <option value="Digital Manifold"></option>
-              <option value="Combustion Analyzer"></option>
-              <option value="Core Removal Tool"></option>
-              <option value="Tubing Cutter"></option>
-              <option value="Hole Saw"></option>
-              <option value="Panel Saw"></option>
-              <option value="Hammer Drill"></option>
-              <option value="SDS Drill"></option>
-              <option value="Scissor Lift"></option>
-              <option value="Ladder"></option>
+              <!-- options will be injected based on existing records -->
             </datalist>
           </div>
 
@@ -169,6 +157,20 @@
             <label for="jobName" class="form-label">Job / Work Order</label>
             <input type="text" id="jobName" class="form-control" required
                    placeholder="Job name/number" />
+          </div>
+
+          <!-- Approved By (authorized person) -->
+          <div class="col-md-4">
+            <label for="approvedBy" class="form-label">
+              Approved By (Warehouse / Parts)
+            </label>
+            <input
+              type="text"
+              id="approvedBy"
+              class="form-control"
+              required
+              placeholder="Name of approver"
+            />
           </div>
 
           <div class="col-md-12">
@@ -210,11 +212,12 @@
                 <th>Status</th>
                 <th>Reason</th>
                 <th>Condition @ Out</th>
+                <th>Approved By</th>
                 <th style="width: 160px;" class="no-print">Actions</th>
               </tr>
             </thead>
             <tbody id="activeTableBody">
-              <!-- Active rows -->
+              <!-- Active rows injected here -->
             </tbody>
           </table>
         </div>
@@ -249,11 +252,12 @@
                 <th>Return</th>
                 <th>Days Out</th>
                 <th>Status</th>
+                <th>Approved By</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody id="issuesTableBody">
-              <!-- Issues rows -->
+              <!-- Issues rows injected here -->
             </tbody>
           </table>
         </div>
@@ -284,11 +288,12 @@
                 <th>Days Out</th>
                 <th>Final Status</th>
                 <th>Condition @ Return</th>
+                <th>Approved By</th>
                 <th>Damage / Missing Notes</th>
               </tr>
             </thead>
             <tbody id="historyTableBody">
-              <!-- History rows -->
+              <!-- History rows injected here -->
             </tbody>
           </table>
         </div>
@@ -303,20 +308,11 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    // Google Apps Script Web App URL (must be deployed with doPost + doGet)
-    const GOOGLE_APPS_SCRIPT_URL =
-      "https://script.google.com/macros/s/AKfycbzm5h2WsVuhQB25iFGTbd87QoQUmYrk69xoCGUDL3W5B3ITXCbhO5CqoxtvjarHJj5t/exec";
+    const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzcBDEAHSjFkuIbHjPsX_4gaJTZkIZcV4ZnqWtyABw6gHCoGbTLAd82_Ztvt34HRu1t/exec";
 
     let records = [];
-
-    // Prevent accidental double-submit of the same checkout
-    let lastCheckoutAttempt = null;
-
-    const filters = {
-      tool: "",
-      tech: "",
-      status: "all"
-    };
+    const filters = { tool: "", tech: "", status: "all" };
+    let lastCheckoutSubmitMs = 0; // 30s duplicate guard
 
     // --- Helpers for dates & status ---
 
@@ -371,14 +367,38 @@
       return records.findIndex(r => r.id === id);
     }
 
-    // Optional local cache (not used as main database)
     function saveRecords() {
+      // Optional: local cache if you want
       // localStorage.setItem("toolCheckouts_v1", JSON.stringify(records));
     }
 
-    // --- Google Sheets logging via Apps Script (WRITE) ---
+    // --- Build Tool presets datalist from existing records ---
 
-    async function logToGoogleSheets(action, rec, daysOutAtEvent) {
+    function rebuildToolPresets() {
+      const datalist = document.getElementById("toolPresets");
+      if (!datalist) return;
+
+      datalist.innerHTML = "";
+      const seen = new Set();
+
+      records.forEach(rec => {
+        const nameRaw = rec.toolName || "";
+        const name = nameRaw.trim();
+        if (!name) return;
+
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        const opt = document.createElement("option");
+        opt.value = name;
+        datalist.appendChild(opt);
+      });
+    }
+
+    // --- Google Sheets logging (write) ---
+
+    async function logToGoogleSheets(action, rec, daysOutAtEvent, approvedBy) {
       if (!GOOGLE_APPS_SCRIPT_URL) {
         console.warn("GOOGLE_APPS_SCRIPT_URL is not set; skipping Sheets log.");
         return;
@@ -397,7 +417,8 @@
         conditionAtReturn: rec.conditionAtReturn,
         damagedOrMissing: rec.damagedOrMissing,
         damageNotes: rec.damageNotes,
-        daysOut: daysOutAtEvent
+        daysOut: daysOutAtEvent,
+        approvedBy: approvedBy || rec.approvedBy || ""
       };
 
       try {
@@ -418,7 +439,7 @@
 
     async function loadRecordsFromSheets() {
       try {
-        const res = await fetch(GOOGLE_APPS_SCRIPT_URL); // GET -> doGet
+        const res = await fetch(GOOGLE_APPS_SCRIPT_URL);
         if (!res.ok) {
           console.error("Failed to load from Sheets:", res.status);
           records = [];
@@ -428,7 +449,6 @@
         const data = await res.json();
         const events = Array.isArray(data.rows) ? data.rows : [];
 
-        // Ensure events are in time order
         events.sort((a, b) => {
           const ta = new Date(a.timestamp).getTime();
           const tb = new Date(b.timestamp).getTime();
@@ -455,7 +475,8 @@
               returnDate: null,
               conditionAtReturn: null,
               damagedOrMissing: false,
-              damageNotes: ""
+              damageNotes: "",
+              approvedBy: ev.approvedBy || ""
             });
           } else if (action === "checkin") {
             const rec = recordMap.get(id);
@@ -463,6 +484,9 @@
             rec.returnDate = ev.returnDate || rec.returnDate || new Date().toISOString();
             if (ev.conditionAtReturn) {
               rec.conditionAtReturn = ev.conditionAtReturn;
+            }
+            if (ev.approvedBy) {
+              rec.approvedBy = ev.approvedBy;
             }
           } else if (
             action === "damaged_or_missing" ||
@@ -478,15 +502,76 @@
             if (!rec.returnDate) {
               rec.returnDate = ev.returnDate || new Date().toISOString();
             }
+            if (ev.approvedBy) {
+              rec.approvedBy = ev.approvedBy;
+            }
           }
         });
 
         records = Array.from(recordMap.values());
         saveRecords();
+        rebuildToolPresets(); // build suggestions from loaded tools
       } catch (err) {
         console.error("Error loading records from Sheets:", err);
         records = [];
       }
+    }
+
+    // --- Check if a tool is allowed to be checked out ---
+
+    function canCheckoutTool(toolName) {
+      const target = (toolName || "").trim().toLowerCase();
+      if (!target) return true;
+
+      for (const rec of records) {
+        const name = (rec.toolName || "").trim().toLowerCase();
+        if (!name || name !== target) continue;
+
+        const hasReturn = !!rec.returnDate;
+        const isDamaged = rec.damagedOrMissing === true;
+
+        const condOut = (rec.conditionAtCheckout || "").toLowerCase();
+        const condRet = (rec.conditionAtReturn || "").toLowerCase();
+
+        const isNotWorking =
+          condRet.includes("not working") ||
+          (!hasReturn && condOut.includes("not working"));
+
+        // 1) Already checked out & not marked damaged
+        if (!hasReturn && !isDamaged) {
+          const tech = rec.techName || "unknown tech";
+          const dateStr = rec.checkoutDate
+            ? new Date(rec.checkoutDate).toLocaleDateString()
+            : "unknown date";
+          alert(
+            `Cannot check out "${toolName}" because it is already checked out to ${tech} (checked out ${dateStr}).`
+          );
+          return false;
+        }
+
+        // 2) Marked damaged / missing
+        if (isDamaged) {
+          const notes = rec.damageNotes || "Tool is marked damaged or missing.";
+          alert(
+            `Cannot check out "${toolName}" because it is marked damaged/missing.\n\nNotes: ${notes}`
+          );
+          return false;
+        }
+
+        // 3) Returned as NOT WORKING
+        if (hasReturn && isNotWorking) {
+          const dateStr = rec.returnDate
+            ? new Date(rec.returnDate).toLocaleDateString()
+            : "unknown date";
+          alert(
+            `Cannot check out "${toolName}" because it was returned as NOT WORKING on ${dateStr}.\n` +
+            `Please repair/replace or clear the status before checking it out again.`
+          );
+          return false;
+        }
+      }
+
+      return true;
     }
 
     // --- Filters ---
@@ -562,7 +647,6 @@
         const daysOut = daysBetween(new Date(rec.checkoutDate), referenceEnd);
         const status = computeStatus(rec);
 
-        // Active & History obey filters
         if (matchesFilters(rec)) {
           if (!hasReturn && !rec.damagedOrMissing) {
             activeCount++;
@@ -580,6 +664,7 @@
               </td>
               <td>${rec.reason}</td>
               <td class="text-capitalize">${rec.conditionAtCheckout}</td>
+              <td>${rec.approvedBy ? rec.approvedBy : "-"}</td>
               <td class="no-print">
                 <button class="btn btn-sm btn-success me-2"
                         data-action="checkin" data-id="${rec.id}">
@@ -613,13 +698,13 @@
               <td class="text-capitalize">
                 ${rec.conditionAtReturn ? rec.conditionAtReturn : "-"}
               </td>
+              <td>${rec.approvedBy ? rec.approvedBy : "-"}</td>
               <td>${rec.damageNotes ? rec.damageNotes : ""}</td>
             `;
             historyBody.appendChild(tr);
           }
         }
 
-        // Issues (always shows everything important)
         const isOver30Active =
           !hasReturn &&
           !rec.damagedOrMissing &&
@@ -651,6 +736,7 @@
                 ${status.label}
               </span>
             </td>
+            <td>${rec.approvedBy ? rec.approvedBy : "-"}</td>
             <td>${notes}</td>
           `;
           issuesBody.appendChild(trIssues);
@@ -683,6 +769,7 @@
         "Damaged / Missing",
         "Damage Notes",
         "Days Out (now)",
+        "Approved By",
         "Status"
       ];
 
@@ -712,6 +799,7 @@
           rec.damagedOrMissing ? "TRUE" : "FALSE",
           rec.damageNotes || "",
           daysOut,
+          rec.approvedBy || "",
           status.label || ""
         ];
       });
@@ -769,28 +857,29 @@
       const checkoutDateInput = document.getElementById("checkoutDate").value;
       const techName = document.getElementById("techName").value.trim();
       const jobName = document.getElementById("jobName").value.trim();
+      const approvedBy = document.getElementById("approvedBy").value.trim();
       const reason = document.getElementById("reason").value.trim();
 
-      if (!toolName || !checkoutDateInput || !techName || !jobName || !reason) {
-        alert("Please fill in all fields.");
+      if (!toolName || !checkoutDateInput || !techName || !jobName || !reason || !approvedBy) {
+        alert("Please fill in all fields (including Approved By).");
         return;
       }
 
-      // 30-second duplicate protection: same Tool + Tech + Job
       const nowMs = Date.now();
-      if (
-        lastCheckoutAttempt &&
-        nowMs - lastCheckoutAttempt.time < 30000 &&
-        lastCheckoutAttempt.toolName === toolName &&
-        lastCheckoutAttempt.techName === techName &&
-        lastCheckoutAttempt.jobName === jobName
-      ) {
+      if (nowMs - lastCheckoutSubmitMs < 30000) {
         alert(
-          "This looks like the same checkout you just submitted.\n" +
-          "Please wait 30 seconds before submitting it again."
+          "You just submitted a checkout less than 30 seconds ago. " +
+          "Please wait a moment to avoid duplicate entries."
         );
         return;
       }
+
+      // 🚫 Check tool availability before creating record
+      if (!canCheckoutTool(toolName)) {
+        return;
+      }
+
+      lastCheckoutSubmitMs = nowMs;
 
       const checkoutISO = new Date(checkoutDateInput).toISOString();
 
@@ -805,20 +894,14 @@
         returnDate: null,
         conditionAtReturn: null,
         damagedOrMissing: false,
-        damageNotes: ""
+        damageNotes: "",
+        approvedBy
       };
 
       records.push(record);
+      rebuildToolPresets(); // make sure new tool is in suggestions
 
-      await logToGoogleSheets("checkout", record, 0);
-
-      // Remember last attempt
-      lastCheckoutAttempt = {
-        time: nowMs,
-        toolName,
-        techName,
-        jobName
-      };
+      await logToGoogleSheets("checkout", record, 0, approvedBy);
 
       saveRecords();
       renderTables();
@@ -851,16 +934,21 @@
           condition = "not working";
         }
 
+        const approvedBy = prompt(
+          "Name of the person approving this check-in (warehouse/parts):"
+        ) || "";
+
         const now = new Date();
         rec.returnDate = now.toISOString();
         rec.conditionAtReturn = condition;
+        if (approvedBy) rec.approvedBy = approvedBy;
 
         const daysOutAtEvent = daysBetween(
           new Date(rec.checkoutDate),
           now
         );
 
-        await logToGoogleSheets("checkin", rec, daysOutAtEvent);
+        await logToGoogleSheets("checkin", rec, daysOutAtEvent, approvedBy);
 
         saveRecords();
         renderTables();
@@ -872,19 +960,24 @@
           "Describe damage or why the tool is missing. This will be visible to Purchasing / GM:"
         );
 
+        const approvedBy = prompt(
+          "Name of the person approving this damage/missing record (warehouse/parts):"
+        ) || "";
+
         const now = new Date();
         rec.damagedOrMissing = true;
         rec.damageNotes = notes || "";
         if (!rec.returnDate) {
           rec.returnDate = now.toISOString();
         }
+        if (approvedBy) rec.approvedBy = approvedBy;
 
         const daysOutAtEvent = daysBetween(
           new Date(rec.checkoutDate),
           now
         );
 
-        await logToGoogleSheets("damaged_or_missing", rec, daysOutAtEvent);
+        await logToGoogleSheets("damaged_or_missing", rec, daysOutAtEvent, approvedBy);
 
         saveRecords();
         renderTables();
@@ -903,7 +996,6 @@
     document.addEventListener("DOMContentLoaded", async () => {
       document.getElementById("checkoutDate").value = todayAsInputDate();
 
-      // Load shared state from Google Sheets at startup
       await loadRecordsFromSheets();
       renderTables();
 
