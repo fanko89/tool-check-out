@@ -57,11 +57,22 @@
 </head>
 <body>
   <div class="container py-4">
-    <h1 class="mb-1">Tool Check In / Out</h1>
-    <p class="text-muted mb-3">
-      Simple tracking for company-owned tools: saws, reclaim units, specialty tools,
-      etc. Based on the warehouse check in/out procedure.
-    </p>
+
+    <!-- Logo + Title -->
+    <div class="d-flex align-items-center mb-3">
+      <img
+        src="img/aysp_logo.png"
+        alt="Company Logo"
+        style="height: 60px; margin-right: 16px;"
+      />
+      <div>
+        <h1 class="mb-1">Tool Check In / Out</h1>
+        <p class="text-muted mb-0">
+          Simple tracking for company-owned tools: saws, reclaim units, specialty tools,
+          etc. Based on the warehouse check in/out procedure.
+        </p>
+      </div>
+    </div>
 
     <!-- Top bar: Filters + Export -->
     <div class="card mb-4 no-print">
@@ -281,7 +292,7 @@
   <script>
     const STORAGE_KEY = "toolCheckouts_v1";
 
-    // Apps Script Web App 
+    // Apps Script Web App URL
     const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwYebiDdugmC3KM-kXaoXKiCdq4fFXPQ3J-RI4VWGI/dev";
 
     let records = [];
