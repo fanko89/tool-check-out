@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Tool Check In / Out</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="/img/navLogo.png"/>
 
   <!-- Bootstrap CSS -->
   <link
@@ -35,7 +36,7 @@
       color: #055160;
     }
     .no-print {
-      /* default: visible on screen, hidden in print via media query */
+      /* visible on screen, hidden in print via media query */
     }
 
     @media print {
@@ -51,6 +52,9 @@
       }
       .container {
         max-width: 100%;
+      }
+      .temp-print-hide {
+        display: none !important;
       }
     }
   </style>
@@ -68,7 +72,7 @@
       <div>
         <h1 class="mb-1">Tool Check In / Out</h1>
         <p class="text-muted mb-0">
-          Simple tracking for company-owned tools: saws, reclaim units, specialty tools,
+          Tracking for company-owned tools: saws, reclaim units, specialty tools,
           etc. Based on the warehouse check in/out procedure.
         </p>
       </div>
@@ -124,7 +128,6 @@
               placeholder="e.g. Reclaim Unit, Panel Saw"
               list="toolPresets"
             />
-            <!-- Preset tools (user can still type anything they want) -->
             <datalist id="toolPresets">
               <option value="Reclaim Unit"></option>
               <option value="Recovery Machine"></option>
@@ -187,7 +190,7 @@
     </div>
 
     <!-- Active Checkouts -->
-    <div class="card mb-4">
+    <div class="card mb-4" id="activeCard">
       <div class="card-header fw-bold d-flex justify-content-between align-items-center">
         <span>Active Tool Checkouts</span>
         <button id="printCheckoutBtn" class="btn btn-sm btn-outline-secondary no-print">
@@ -211,7 +214,7 @@
               </tr>
             </thead>
             <tbody id="activeTableBody">
-              <!-- Active rows injected here -->
+              <!-- Active rows -->
             </tbody>
           </table>
         </div>
@@ -222,12 +225,17 @@
     </div>
 
     <!-- Exceptions / Issues (Purchasing / GM View) -->
-    <div class="card mb-4 no-print">
+    <div class="card mb-4" id="issuesCard">
       <div class="card-header fw-bold d-flex justify-content-between align-items-center">
         <span>Exceptions &amp; Issues (Purchasing / GM View)</span>
-        <span class="text-muted small">
-          Shows tools over 30 days and any damaged / missing items.
-        </span>
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-muted small">
+            Shows tools over 30 days and any damaged / missing items.
+          </span>
+          <button id="printIssuesBtn" class="btn btn-sm btn-outline-secondary no-print">
+            Print Exceptions / Issues
+          </button>
+        </div>
       </div>
       <div class="card-body">
         <div class="table-responsive">
@@ -245,7 +253,7 @@
               </tr>
             </thead>
             <tbody id="issuesTableBody">
-              <!-- Issues rows injected here -->
+              <!-- Issues rows -->
             </tbody>
           </table>
         </div>
@@ -256,8 +264,13 @@
     </div>
 
     <!-- History -->
-    <div class="card no-print">
-      <div class="card-header fw-bold">Returned / Closed Records</div>
+    <div class="card" id="historyCard">
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+        <span>Returned / Closed Records</span>
+        <button id="printHistoryBtn" class="btn btn-sm btn-outline-secondary no-print">
+          Print Returned / Closed
+        </button>
+      </div>
       <div class="card-body">
         <div class="table-responsive">
           <table class="table table-sm align-middle">
@@ -275,7 +288,7 @@
               </tr>
             </thead>
             <tbody id="historyTableBody">
-              <!-- History rows injected here -->
+              <!-- History rows -->
             </tbody>
           </table>
         </div>
@@ -290,12 +303,14 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    const STORAGE_KEY = "toolCheckouts_v1";
-
-    // Apps Script Web App URL
-    const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz2fyh_B-ym97p3NOrzSXToUkF7A0v1g761hiIzejhd_G5kYKJQb8ZYErqG7p2EnCBF/exec";
+    // Google Apps Script Web App URL (must be deployed with doPost + doGet)
+    const GOOGLE_APPS_SCRIPT_URL =
+      "https://script.google.com/macros/s/AKfycbzm5h2WsVuhQB25iFGTbd87QoQUmYrk69xoCGUDL3W5B3ITXCbhO5CqoxtvjarHJj5t/exec";
 
     let records = [];
+
+    // Prevent accidental double-submit of the same checkout
+    let lastCheckoutAttempt = null;
 
     const filters = {
       tool: "",
@@ -323,18 +338,11 @@
 
     function computeStatus(rec) {
       if (rec.damagedOrMissing) {
-        return {
-          label: "Damaged / Missing",
-          style: "status-danger"
-        };
+        return { label: "Damaged / Missing", style: "status-danger" };
       }
       if (rec.returnDate) {
-        return {
-          label: "Returned",
-          style: "status-info"
-        };
+        return { label: "Returned", style: "status-info" };
       }
-      // Active: compute based on days out
       const checkout = new Date(rec.checkoutDate);
       const now = new Date();
       const d = daysBetween(checkout, now);
@@ -356,71 +364,131 @@
           style: "status-warning"
         };
       }
-      return {
-        label: "OK",
-        style: "status-ok"
-      };
+      return { label: "OK", style: "status-ok" };
     }
 
     function findRecordIndex(id) {
       return records.findIndex(r => r.id === id);
     }
 
-    function loadRecords() {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        records = [];
-        return;
-      }
-      try {
-        records = JSON.parse(raw) || [];
-      } catch (e) {
-        console.error("Failed to parse stored records", e);
-        records = [];
-      }
-    }
-
+    // Optional local cache (not used as main database)
     function saveRecords() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      // localStorage.setItem("toolCheckouts_v1", JSON.stringify(records));
     }
 
-    // --- Google Sheets logging via Apps Script ---
+    // --- Google Sheets logging via Apps Script (WRITE) ---
 
     async function logToGoogleSheets(action, rec, daysOutAtEvent) {
-  if (!GOOGLE_APPS_SCRIPT_URL) {
-    console.warn("GOOGLE_APPS_SCRIPT_URL is not set; skipping Sheets log.");
-    return;
-  }
+      if (!GOOGLE_APPS_SCRIPT_URL) {
+        console.warn("GOOGLE_APPS_SCRIPT_URL is not set; skipping Sheets log.");
+        return;
+      }
 
-  const payload = {
-    action,
-    id: rec.id,
-    toolName: rec.toolName,
-    techName: rec.techName,
-    jobName: rec.jobName,
-    reason: rec.reason,
-    checkoutDate: rec.checkoutDate,
-    returnDate: rec.returnDate,
-    conditionAtCheckout: rec.conditionAtCheckout,
-    conditionAtReturn: rec.conditionAtReturn,
-    damagedOrMissing: rec.damagedOrMissing,
-    damageNotes: rec.damageNotes,
-    daysOut: daysOutAtEvent
-  };
+      const payload = {
+        action,
+        id: rec.id,
+        toolName: rec.toolName,
+        techName: rec.techName,
+        jobName: rec.jobName,
+        reason: rec.reason,
+        checkoutDate: rec.checkoutDate,
+        returnDate: rec.returnDate,
+        conditionAtCheckout: rec.conditionAtCheckout,
+        conditionAtReturn: rec.conditionAtReturn,
+        damagedOrMissing: rec.damagedOrMissing,
+        damageNotes: rec.damageNotes,
+        daysOut: daysOutAtEvent
+      };
 
-  try {
-    const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+      try {
+        const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
 
-    if (!res.ok) {
-      console.error("Sheets log HTTP error:", res.status, await res.text());
+        if (!res.ok) {
+          console.error("Sheets log HTTP error:", res.status, await res.text());
+        }
+      } catch (err) {
+        console.error("Failed to log to Google Sheets:", err);
+      }
     }
-  } catch (err) {
-    console.error("Failed to log to Google Sheets:", err);
-  }
-}
+
+    // --- Google Sheets READ (shared source of truth) ---
+
+    async function loadRecordsFromSheets() {
+      try {
+        const res = await fetch(GOOGLE_APPS_SCRIPT_URL); // GET -> doGet
+        if (!res.ok) {
+          console.error("Failed to load from Sheets:", res.status);
+          records = [];
+          return;
+        }
+
+        const data = await res.json();
+        const events = Array.isArray(data.rows) ? data.rows : [];
+
+        // Ensure events are in time order
+        events.sort((a, b) => {
+          const ta = new Date(a.timestamp).getTime();
+          const tb = new Date(b.timestamp).getTime();
+          return ta - tb;
+        });
+
+        const recordMap = new Map();
+
+        events.forEach(ev => {
+          const id = ev.id;
+          if (!id) return;
+
+          const action = (ev.action || "").toLowerCase();
+
+          if (action === "checkout") {
+            recordMap.set(id, {
+              id: id,
+              toolName: ev.toolName || "",
+              conditionAtCheckout: ev.conditionAtCheckout || "working",
+              checkoutDate: ev.checkoutDate || new Date().toISOString(),
+              techName: ev.techName || "",
+              jobName: ev.jobName || "",
+              reason: ev.reason || "",
+              returnDate: null,
+              conditionAtReturn: null,
+              damagedOrMissing: false,
+              damageNotes: ""
+            });
+          } else if (action === "checkin") {
+            const rec = recordMap.get(id);
+            if (!rec) return;
+            rec.returnDate = ev.returnDate || rec.returnDate || new Date().toISOString();
+            if (ev.conditionAtReturn) {
+              rec.conditionAtReturn = ev.conditionAtReturn;
+            }
+          } else if (
+            action === "damaged_or_missing" ||
+            action === "damaged" ||
+            action === "damage"
+          ) {
+            const rec = recordMap.get(id);
+            if (!rec) return;
+            rec.damagedOrMissing = true;
+            if (ev.damageNotes) {
+              rec.damageNotes = ev.damageNotes;
+            }
+            if (!rec.returnDate) {
+              rec.returnDate = ev.returnDate || new Date().toISOString();
+            }
+          }
+        });
+
+        records = Array.from(recordMap.values());
+        saveRecords();
+      } catch (err) {
+        console.error("Error loading records from Sheets:", err);
+        records = [];
+      }
+    }
+
     // --- Filters ---
 
     function matchesFilters(rec) {
@@ -494,13 +562,11 @@
         const daysOut = daysBetween(new Date(rec.checkoutDate), referenceEnd);
         const status = computeStatus(rec);
 
-        // --- Active & History respect filters ---
+        // Active & History obey filters
         if (matchesFilters(rec)) {
           if (!hasReturn && !rec.damagedOrMissing) {
-            // Active
             activeCount++;
             const tr = document.createElement("tr");
-
             tr.innerHTML = `
               <td>${rec.toolName}</td>
               <td>${rec.techName}</td>
@@ -527,12 +593,10 @@
             `;
             activeBody.appendChild(tr);
           } else {
-            // History (returned or damaged/missing)
             historyCount++;
             const returnDateStr = rec.returnDate
               ? new Date(rec.returnDate).toLocaleDateString()
               : "-";
-
             const tr = document.createElement("tr");
             tr.innerHTML = `
               <td>${rec.toolName}</td>
@@ -555,11 +619,11 @@
           }
         }
 
-        // --- Issues (Purchasing / GM) ignores filters (always shows everything important) ---
+        // Issues (always shows everything important)
         const isOver30Active =
           !hasReturn &&
           !rec.damagedOrMissing &&
-          daysOut > 30; // active and over 30 days
+          daysOut > 30;
 
         const isDamaged = rec.damagedOrMissing === true;
 
@@ -678,9 +742,26 @@
       URL.revokeObjectURL(url);
     }
 
+    // --- Print only one section ---
+
+    function printSection(cardId) {
+      const cards = document.querySelectorAll(".card");
+      const hidden = [];
+      cards.forEach(card => {
+        if (card.id !== cardId) {
+          card.classList.add("temp-print-hide");
+          hidden.push(card);
+        }
+      });
+
+      window.print();
+
+      hidden.forEach(card => card.classList.remove("temp-print-hide"));
+    }
+
     // --- Form + button handlers ---
 
-    function handleCheckoutSubmit(event) {
+    async function handleCheckoutSubmit(event) {
       event.preventDefault();
 
       const toolName = document.getElementById("toolName").value.trim();
@@ -695,6 +776,22 @@
         return;
       }
 
+      // 30-second duplicate protection: same Tool + Tech + Job
+      const nowMs = Date.now();
+      if (
+        lastCheckoutAttempt &&
+        nowMs - lastCheckoutAttempt.time < 30000 &&
+        lastCheckoutAttempt.toolName === toolName &&
+        lastCheckoutAttempt.techName === techName &&
+        lastCheckoutAttempt.jobName === jobName
+      ) {
+        alert(
+          "This looks like the same checkout you just submitted.\n" +
+          "Please wait 30 seconds before submitting it again."
+        );
+        return;
+      }
+
       const checkoutISO = new Date(checkoutDateInput).toISOString();
 
       const record = {
@@ -705,7 +802,6 @@
         techName,
         jobName,
         reason,
-        // later fields:
         returnDate: null,
         conditionAtReturn: null,
         damagedOrMissing: false,
@@ -714,8 +810,15 @@
 
       records.push(record);
 
-      // Log checkout to Google Sheets (daysOut = 0)
-      logToGoogleSheets("checkout", record, 0);
+      await logToGoogleSheets("checkout", record, 0);
+
+      // Remember last attempt
+      lastCheckoutAttempt = {
+        time: nowMs,
+        toolName,
+        techName,
+        jobName
+      };
 
       saveRecords();
       renderTables();
@@ -725,7 +828,7 @@
       document.getElementById("toolCondition").value = "working";
     }
 
-    function handleActiveTableClick(event) {
+    async function handleActiveTableClick(event) {
       const btn = event.target.closest("button[data-action]");
       if (!btn) return;
 
@@ -757,8 +860,7 @@
           now
         );
 
-        // Log check-in to Google Sheets
-        logToGoogleSheets("checkin", rec, daysOutAtEvent);
+        await logToGoogleSheets("checkin", rec, daysOutAtEvent);
 
         saveRecords();
         renderTables();
@@ -782,8 +884,7 @@
           now
         );
 
-        // Log damage/missing to Google Sheets
-        logToGoogleSheets("damaged_or_missing", rec, daysOutAtEvent);
+        await logToGoogleSheets("damaged_or_missing", rec, daysOutAtEvent);
 
         saveRecords();
         renderTables();
@@ -799,11 +900,11 @@
 
     // --- Initialize ---
 
-    document.addEventListener("DOMContentLoaded", () => {
-      // Default checkout date to today
+    document.addEventListener("DOMContentLoaded", async () => {
       document.getElementById("checkoutDate").value = todayAsInputDate();
 
-      loadRecords();
+      // Load shared state from Google Sheets at startup
+      await loadRecordsFromSheets();
       renderTables();
 
       document
@@ -828,9 +929,18 @@
         .getElementById("exportCsvBtn")
         .addEventListener("click", exportCsv);
 
-      const printBtn = document.getElementById("printCheckoutBtn");
-      if (printBtn) {
-        printBtn.addEventListener("click", () => window.print());
+      const printCheckoutBtn = document.getElementById("printCheckoutBtn");
+      const printIssuesBtn = document.getElementById("printIssuesBtn");
+      const printHistoryBtn = document.getElementById("printHistoryBtn");
+
+      if (printCheckoutBtn) {
+        printCheckoutBtn.addEventListener("click", () => printSection("activeCard"));
+      }
+      if (printIssuesBtn) {
+        printIssuesBtn.addEventListener("click", () => printSection("issuesCard"));
+      }
+      if (printHistoryBtn) {
+        printHistoryBtn.addEventListener("click", () => printSection("historyCard"));
       }
     });
   </script>
